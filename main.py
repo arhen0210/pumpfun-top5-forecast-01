@@ -47,6 +47,8 @@ CHALLENGER_NOISE = 0.08       # base jitter of a challenger at a read
 SMOOTH_ALPHA = 1.0     # add-one (Laplace) smoothing on raw counts
 PROB_FLOOR = 1e-4      # nothing may be exactly zero
 MAX_NAMED_PER_PLACE = 6  # cap distinct named coins per place (keep unnamed mass)
+TEMPER_ALPHA = 0.75    # p^alpha, renormalised to the place's previous named mass;
+                       # the standard correction for an over-confident simulation
 
 SEED_ENV = "MAKEFUN_TRIAL_SEED"
 FIXED_SEED = 20261112
@@ -503,19 +505,32 @@ def emit_output(output_dir, task, places, results, n_bins, edges, mints_sorted):
         if denom <= 0:
             denom = 1.0
         ranked = sorted(counts[k].items(), key=lambda kv: (-kv[1], str(kv[0])))
-        named = 0
+        # raw p over the coins we name (challengers are never named)
+        raw = []
         for mint, cnt in ranked:
-            if named >= MAX_NAMED_PER_PLACE:
-                break
             if mint.startswith(CHALLENGER_PREFIX):
                 continue  # challenger coins are never named
-            p = (cnt + SMOOTH_ALPHA) / denom
+            raw.append((mint, (cnt + SMOOTH_ALPHA) / denom))
+            if len(raw) >= MAX_NAMED_PER_PLACE:
+                break
+        # temper: raise every named p to TEMPER_ALPHA and renormalise the
+        # place to its previous mass. A sum of logs rewards calibration, not
+        # confidence, so an over-confident spike at place 1 loses more on the
+        # four thin places than it gains on the one it nails.
+        mass = sum(p for _, p in raw)
+        pow_sum = sum(p ** TEMPER_ALPHA for _, p in raw)
+        tempered = []
+        if pow_sum > 0.0 and mass > 0.0:
+            scale = mass / pow_sum
+            tempered = [(mint, p ** TEMPER_ALPHA * scale) for mint, p in raw]
+        else:
+            tempered = raw
+        for mint, p in tempered:
             if p < PROB_FLOOR:
                 p = PROB_FLOOR
             if p > 1.0 - PROB_FLOOR:
                 p = 1.0 - PROB_FLOOR
             probabilities.append({"mint": mint, "place": k + 1, "p": round(p, 6)})
-            named += 1
 
     # top5: greedily take the most likely coin for place 1, 2, ... no repeats;
     # if the field is too small to fill five places, pad with the strongest
