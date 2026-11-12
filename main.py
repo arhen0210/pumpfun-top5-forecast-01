@@ -46,7 +46,10 @@ CHALLENGER_SLOPE_CLIP = 0.7  # a newborn can moon, but not by 5 log10 units
 CHALLENGER_NOISE = 0.08       # base jitter of a challenger at a read
 SMOOTH_ALPHA = 1.0     # add-one (Laplace) smoothing on raw counts
 PROB_FLOOR = 1e-4      # nothing may be exactly zero
-MAX_NAMED_PER_PLACE = 6  # cap distinct named coins per place (keep unnamed mass)
+MAX_NAMED_PER_PLACE = 100  # schema limit on rows per place
+ROW_MIN_P = 0.005      # emit every named row at or above this p after
+                      # tempering; a named coin with real mass beats dumping
+                      # it into the unnamed share split over hundreds of coins
 TEMPER_ALPHA = 0.75    # p^alpha, renormalised to the place's previous mass;
                        # the standard correction for an over-confident simulation
 MAX_P_FRAC = 0.45      # no named coin may take more than this fraction of its
@@ -549,7 +552,8 @@ def emit_output(output_dir, task, places, results, n_bins, edges, mints_sorted):
         if denom <= 0:
             denom = 1.0
         ranked = sorted(counts[k].items(), key=lambda kv: (-kv[1], str(kv[0])))
-        # raw p over the coins we name (challengers are never named)
+        # raw p over the real coins we may name, up to the schema's row limit
+        # (challengers are never named)
         raw = []
         for mint, cnt in ranked:
             if mint.startswith(CHALLENGER_PREFIX):
@@ -571,7 +575,14 @@ def emit_output(output_dir, task, places, results, n_bins, edges, mints_sorted):
             tempered = raw
         if mass > 0.0:
             tempered = cap_distribution(tempered, MAX_P_FRAC)
+        # name every coin whose tempered p clears ROW_MIN_P: a named coin
+        # with a small real p beats dumping that mass into the unnamed share,
+        # which the scorer divides over the whole rest of the chart. Rows
+        # under the threshold are simply not emitted; their mass stays in the
+        # unnamed share (no renormalisation back into the kept rows).
         for mint, p in tempered:
+            if p < ROW_MIN_P:
+                continue
             if p < PROB_FLOOR:
                 p = PROB_FLOOR
             if p > 1.0 - PROB_FLOOR:
