@@ -47,8 +47,11 @@ CHALLENGER_NOISE = 0.08       # base jitter of a challenger at a read
 SMOOTH_ALPHA = 1.0     # add-one (Laplace) smoothing on raw counts
 PROB_FLOOR = 1e-4      # nothing may be exactly zero
 MAX_NAMED_PER_PLACE = 6  # cap distinct named coins per place (keep unnamed mass)
-TEMPER_ALPHA = 0.75    # p^alpha, renormalised to the place's previous named mass;
+TEMPER_ALPHA = 0.75    # p^alpha, renormalised to the place's previous mass;
                        # the standard correction for an over-confident simulation
+MAX_P_FRAC = 0.45      # no named coin may take more than this fraction of its
+                       # place's named mass; excess spread over the other named
+                       # coins proportionally
 
 SEED_ENV = "MAKEFUN_TRIAL_SEED"
 FIXED_SEED = 20261112
@@ -257,6 +260,47 @@ def median_level_of_top(marks, top=10):
     if not caps:
         caps = [math.log10(r["cap"]) - 9.0 for r in marks[-1]["rows"]]
     return robust_median(caps)
+
+
+def cap_distribution(items, cap_frac):
+    """Redistribute so no single item exceeds cap_frac of the total mass.
+
+    Water-fill: p_i' = min(cap, p_i * s) with the scale s chosen so the sum
+    is preserved (F(s) = sum min(cap, p_i*s) is monotone in s, so bisect).
+    Deterministic: fixed iteration count, pure float arithmetic.
+    """
+    if not items:
+        return items
+    total = sum(p for _, p in items)
+    if total <= 0.0:
+        return items
+    cap = cap_frac * total
+    positive = [p for _, p in items if p > 0.0]
+    if not positive:
+        return items
+    n_pos = len(positive)
+    if n_pos * cap < total:
+        # capping is infeasible (cap too small for the item count): the
+        # flattest mass-preserving choice is uniform over the positive items
+        share = total / n_pos
+        return [(mint, share if p > 0.0 else 0.0) for mint, p in items]
+    # bracket s: F(0) = 0 <= total; F(s_hi) = (#positive)*cap >= total
+    # whenever cap_frac * count(positive) >= 1, which holds for >= 3 items at
+    # 0.45; guard by widening if the bracket somehow fails.
+    s_hi = cap / min(positive)
+    for _ in range(4):
+        if sum(min(cap, p * s_hi) for p in positive) >= total:
+            break
+        s_hi *= 2.0
+    s_lo = 0.0
+    for _ in range(200):
+        s_mid = 0.5 * (s_lo + s_hi)
+        if sum(min(cap, p * s_mid) for p in positive) >= total:
+            s_hi = s_mid
+        else:
+            s_lo = s_mid
+    s = 0.5 * (s_lo + s_hi)
+    return [(mint, min(cap, p * s)) for mint, p in items]
 
 
 # ----------------------------------------------------------------------------
@@ -525,6 +569,8 @@ def emit_output(output_dir, task, places, results, n_bins, edges, mints_sorted):
             tempered = [(mint, p ** TEMPER_ALPHA * scale) for mint, p in raw]
         else:
             tempered = raw
+        if mass > 0.0:
+            tempered = cap_distribution(tempered, MAX_P_FRAC)
         for mint, p in tempered:
             if p < PROB_FLOOR:
                 p = PROB_FLOOR
