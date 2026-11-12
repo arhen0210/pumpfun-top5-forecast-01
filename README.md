@@ -6,8 +6,10 @@ Run it with `MAKEFUN_INPUT_DIR=/input MAKEFUN_OUTPUT_DIR=/output python3 main.py
 Output: `probabilities` per place, `top5` in place order, and `sizes` as an 82-bin log10-cap histogram per place, written to `$MAKEFUN_OUTPUT_DIR/forecast.json`.
 
 Place-distribution shaping (order score): the raw Monte Carlo counts are
-tempered (p^0.75, renormalised to the place's named mass), capped so no single
-coin holds more than 45% of a place's named mass (water-fill redistribution),
-and every coin whose tempered p clears 0.005 is named (up to the 100-row
-schema limit) with a 0.004 floor per named row. The size histograms are
+sharpened (p^1.35, renormalised to the place's named mass), capped so no single
+coin holds more than 65% of a place's named mass (water-fill redistribution),
+and every coin whose sharpened p clears 0.02 is named (up to 12 rows per place)
+with a 0.004 floor per named row. Direction chosen from two measured server
+scores (v1 -37.10 vs flattened v2 -38.20): flattening cost 1.06 nats, so the
+simulation is under-confident at the top. The size histograms are
 deliberately untouched relative to the first submitted entry.

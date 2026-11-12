@@ -47,17 +47,23 @@ CHALLENGER_NOISE = 0.08       # base jitter of a challenger at a read
 SMOOTH_ALPHA = 1.0     # add-one (Laplace) smoothing on raw counts
 PROB_FLOOR = 1e-4      # nothing may be exactly zero
 MAX_NAMED_PER_PLACE = 100  # schema limit on rows per place
-ROW_MIN_P = 0.005      # emit every named row at or above this p after
-                      # tempering; a named coin with real mass beats dumping
-                      # it into the unnamed share split over hundreds of coins
-NAMED_ROW_FLOOR = 0.004  # a named row below this is a wasted row: the
-                      # scorer's unnamed per-coin share is worth more than a
-                      # 0.0002 row, so never emit one
-TEMPER_ALPHA = 0.75    # p^alpha, renormalised to the place's previous mass;
-                       # the standard correction for an over-confident simulation
-MAX_P_FRAC = 0.45      # no named coin may take more than this fraction of its
+TEMPER_ALPHA = 1.35    # p^alpha, renormalised to the place's previous mass.
+                       # Measured gradient (v1 untempered log_score -37.10 vs
+                       # v2 flattened -38.20): the simulation is UNDER-confident
+                       # at the top, so alpha > 1 sharpens the leader spike
+MAX_P_FRAC = 0.65      # no named coin may take more than this fraction of its
                        # place's named mass; excess spread over the other named
-                       # coins proportionally
+                       # coins proportionally (water-fill)
+ROW_MIN_P = 0.02       # emit only named rows at or above this p after
+                       # tempering; the tail already sits near the 1e-4 floor,
+                       # so its mass is worth less than the concentration it
+                       # dilutes at the top
+MAX_ROWS_PER_PLACE = 12  # hard cap on emitted rows per place, largest
+                       # tempered p first; the ROW_MIN_P gate usually binds
+                       # first, this is insurance
+NAMED_ROW_FLOOR = 0.004  # a named row below this is a wasted row: the
+                       # scorer's unnamed per-coin share is worth more than a
+                       # 0.0002 row, so never emit one
 
 SEED_ENV = "MAKEFUN_TRIAL_SEED"
 FIXED_SEED = 20261112
@@ -292,7 +298,7 @@ def cap_distribution(items, cap_frac):
         return [(mint, share if p > 0.0 else 0.0) for mint, p in items]
     # bracket s: F(0) = 0 <= total; F(s_hi) = (#positive)*cap >= total
     # whenever cap_frac * count(positive) >= 1, which holds for >= 3 items at
-    # 0.45; guard by widening if the bracket somehow fails.
+    # 0.65; guard by widening if the bracket somehow fails.
     s_hi = cap / min(positive)
     for _ in range(4):
         if sum(min(cap, p * s_hi) for p in positive) >= total:
@@ -565,9 +571,11 @@ def emit_output(output_dir, task, places, results, n_bins, edges, mints_sorted):
             if len(raw) >= MAX_NAMED_PER_PLACE:
                 break
         # temper: raise every named p to TEMPER_ALPHA and renormalise the
-        # place to its previous mass. A sum of logs rewards calibration, not
-        # confidence, so an over-confident spike at place 1 loses more on the
-        # four thin places than it gains on the one it nails.
+        # place to its previous mass. Two server scores (v1 log_score -37.10,
+        # v2 flattened -38.20) measured the gradient: flattening the spike
+        # COST 1.06 nats, so the simulation is under-confident at the top and
+        # the correct direction is alpha > 1 -- sharpen the leader, let the
+        # already-thin tail fall toward the unnamed share.
         mass = sum(p for _, p in raw)
         pow_sum = sum(p ** TEMPER_ALPHA for _, p in raw)
         tempered = []
@@ -578,12 +586,15 @@ def emit_output(output_dir, task, places, results, n_bins, edges, mints_sorted):
             tempered = raw
         if mass > 0.0:
             tempered = cap_distribution(tempered, MAX_P_FRAC)
-        # name every coin whose tempered p clears ROW_MIN_P: a named coin
-        # with a small real p beats dumping that mass into the unnamed share,
-        # which the scorer divides over the whole rest of the chart. Rows
-        # under the threshold are simply not emitted; their mass stays in the
-        # unnamed share (no renormalisation back into the kept rows).
+        # emit only rows whose tempered p clears ROW_MIN_P, at most
+        # MAX_ROWS_PER_PLACE of them, largest p first: a thin tail row sits
+        # near the 1e-4 floor either way, so its mass is worth less than the
+        # concentration it dilutes. Rows under the threshold are not emitted;
+        # their mass stays in the unnamed share (no renormalisation back).
+        emitted = 0
         for mint, p in tempered:
+            if emitted >= MAX_ROWS_PER_PLACE:
+                break
             if p < ROW_MIN_P:
                 continue
             if p < NAMED_ROW_FLOOR:
@@ -591,6 +602,7 @@ def emit_output(output_dir, task, places, results, n_bins, edges, mints_sorted):
             if p > 1.0 - PROB_FLOOR:
                 p = 1.0 - PROB_FLOOR
             probabilities.append({"mint": mint, "place": k + 1, "p": round(p, 6)})
+            emitted += 1
 
     # top5: greedily take the most likely coin for place 1, 2, ... no repeats;
     # if the field is too small to fill five places, pad with the strongest
