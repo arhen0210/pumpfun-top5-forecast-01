@@ -51,14 +51,14 @@ TEMPER_ALPHA = 1.35    # p^alpha, renormalised to the place's previous mass.
                        # Measured gradient (v1 untempered log_score -37.10 vs
                        # v2 flattened -38.20): the simulation is UNDER-confident
                        # at the top, so alpha > 1 sharpens the leader spike
-MAX_P_FRAC = 0.65      # no named coin may take more than this fraction of its
+MAX_P_FRAC = 0.95      # no named coin may take more than this fraction of its
                        # place's named mass; excess spread over the other named
                        # coins proportionally (water-fill)
-ROW_MIN_P = 0.02       # emit only named rows at or above this p after
+ROW_MIN_P = 0.002      # emit only named rows at or above this p after
                        # tempering; the tail already sits near the 1e-4 floor,
                        # so its mass is worth less than the concentration it
                        # dilutes at the top
-MAX_ROWS_PER_PLACE = 12  # hard cap on emitted rows per place, largest
+MAX_ROWS_PER_PLACE = 80  # hard cap on emitted rows per place, largest
                        # tempered p first; the ROW_MIN_P gate usually binds
                        # first, this is insurance
 NAMED_ROW_FLOOR = 0.004  # a named row below this is a wasted row: the
