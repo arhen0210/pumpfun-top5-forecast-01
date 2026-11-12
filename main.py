@@ -50,6 +50,9 @@ MAX_NAMED_PER_PLACE = 100  # schema limit on rows per place
 ROW_MIN_P = 0.005      # emit every named row at or above this p after
                       # tempering; a named coin with real mass beats dumping
                       # it into the unnamed share split over hundreds of coins
+NAMED_ROW_FLOOR = 0.004  # a named row below this is a wasted row: the
+                      # scorer's unnamed per-coin share is worth more than a
+                      # 0.0002 row, so never emit one
 TEMPER_ALPHA = 0.75    # p^alpha, renormalised to the place's previous mass;
                        # the standard correction for an over-confident simulation
 MAX_P_FRAC = 0.45      # no named coin may take more than this fraction of its
@@ -583,8 +586,8 @@ def emit_output(output_dir, task, places, results, n_bins, edges, mints_sorted):
         for mint, p in tempered:
             if p < ROW_MIN_P:
                 continue
-            if p < PROB_FLOOR:
-                p = PROB_FLOOR
+            if p < NAMED_ROW_FLOOR:
+                p = NAMED_ROW_FLOOR
             if p > 1.0 - PROB_FLOOR:
                 p = 1.0 - PROB_FLOOR
             probabilities.append({"mint": mint, "place": k + 1, "p": round(p, 6)})
